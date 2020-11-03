@@ -13,3 +13,4 @@
 .externalNativeBuild
 .cxx
 local.properties
+/app/src/main/java/com/bignerdranch/android/photogallery/Settings.java
