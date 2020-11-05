@@ -5,6 +5,7 @@ import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
@@ -45,6 +46,15 @@ public class PhotoGalleryFragment extends Fragment {
                              Bundle savedInstanceState) {
         View v = inflater.inflate(R.layout.fragment_photo_gallery, container, false);
         mPhotoRecyclerView = (RecyclerView) v.findViewById(R.id.photo_recycler_view);
+        mPhotoRecyclerView.getViewTreeObserver()
+                .addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
+            @Override
+            public void onGlobalLayout() {
+                if (v.getWidth() > 1600) {
+                    ((GridLayoutManager)mPhotoRecyclerView.getLayoutManager()).setSpanCount(4);
+                }
+            }
+        });
         mPhotoRecyclerView.setLayoutManager(new GridLayoutManager(getActivity(), 3));
         LinearLayoutManager layoutManager = (LinearLayoutManager) mPhotoRecyclerView.getLayoutManager();
         mPhotoRecyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
