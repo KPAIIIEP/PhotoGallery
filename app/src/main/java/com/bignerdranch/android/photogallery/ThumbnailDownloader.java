@@ -20,6 +20,7 @@ public class ThumbnailDownloader<T> extends HandlerThread {
     private ConcurrentMap<T,String> mRequestMap = new ConcurrentHashMap<>();
     private Handler mResponseHandler;
     private ThumbnailDownloadListener<T> mThumbnailDownloadListener;
+    private final ThumbnailCache mThumbnailCache;
 
     public interface ThumbnailDownloadListener<T> {
         void onThumbnailDownloaded(T target, Bitmap thumbnail);
@@ -29,9 +30,10 @@ public class ThumbnailDownloader<T> extends HandlerThread {
         mThumbnailDownloadListener = listener;
     }
 
-    public ThumbnailDownloader(Handler responseHandler) {
+    public ThumbnailDownloader(Handler responseHandler, ThumbnailCache thumbnailCache) {
         super(TAG);
         mResponseHandler = responseHandler;
+        mThumbnailCache = thumbnailCache;
     }
 
     @Override
@@ -70,22 +72,30 @@ public class ThumbnailDownloader<T> extends HandlerThread {
     }
 
     private void handleRequest(final T target) {
+        final Bitmap bitmap;
         try {
             final String url = mRequestMap.get(target);
             if (url == null) {
                 return;
             }
-            byte[] bitmapBytes = new FlickrFetchr().getUrlBytes(url);
-            final Bitmap bitmap = BitmapFactory
-                    .decodeByteArray(bitmapBytes, 0, bitmapBytes.length);
-            Log.i(TAG, "Bitmap created");
+            if (mThumbnailCache.get(url) == null) {
+                byte[] bitmapBytes = new FlickrFetchr().getUrlBytes(url);
+                bitmap = BitmapFactory.decodeByteArray(bitmapBytes, 0, bitmapBytes.length);
+                mThumbnailCache.put(url, bitmap);
+                Log.i(TAG, target.getClass().getSimpleName() + ": Bitmap created");
+            } else {
+                Log.i(TAG, target.getClass().getSimpleName() + ": Bitmap in cache");
+                bitmap = (Bitmap) mThumbnailCache.get(url);
+            }
             mResponseHandler.post(new Runnable() {
                 public void run() {
                     if (mRequestMap.get(target) != url || mHasQuit) {
                         return;
                     }
                     mRequestMap.remove(target);
-                    mThumbnailDownloadListener.onThumbnailDownloaded(target, bitmap);
+                    if (target.getClass().getSimpleName().equals("PhotoHolder")) {
+                        mThumbnailDownloadListener.onThumbnailDownloaded(target, bitmap);
+                    }
                 }
             });
         } catch (IOException ioe) {

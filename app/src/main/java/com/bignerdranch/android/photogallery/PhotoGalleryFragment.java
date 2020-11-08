@@ -13,12 +13,10 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.view.ViewTreeObserver;
 import android.widget.ProgressBar;
-import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
-import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
@@ -29,12 +27,15 @@ public class PhotoGalleryFragment extends Fragment {
 
     private RecyclerView mPhotoRecyclerView;
     private List<GalleryItem> mItems = new ArrayList<>();
-    ProgressBar mProgressBar;
-    private ThumbnailDownloader<PhotoHolder> mThumbnailDownloader;
     private ProgressBar mProgressBar;
+    private ThumbnailDownloader<PhotoHolder> mThumbnailDownloader;
+    private ThumbnailDownloader<GalleryItem> mGalleryItemThumbnailDownloader;
     private int mPage = 1;
     private int mPreviousTotal = 0;
     private boolean mLoading = true;
+    private int mLastVisibleItemPosition = 0;
+    private boolean mNewPageLoaded = true;
+    private ThumbnailCache mThumbnailCache;
 
     public static PhotoGalleryFragment newInstance() {
         return new PhotoGalleryFragment();
@@ -44,12 +45,11 @@ public class PhotoGalleryFragment extends Fragment {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setRetainInstance(true);
+        mThumbnailCache = new ThumbnailCache(ThumbnailCache.getMaxSize(getContext()));
         mProgressBar = (ProgressBar) getActivity().findViewById(R.id.progressBar);
         mProgressBar.setVisibility(ProgressBar.VISIBLE);
-        new FetchItemsTask().execute();
-
         Handler responseHandler = new Handler();
-        mThumbnailDownloader = new ThumbnailDownloader<>(responseHandler);
+        mThumbnailDownloader = new ThumbnailDownloader<>(responseHandler, mThumbnailCache);
         mThumbnailDownloader.setThumbnailDownloadListener(
                 new ThumbnailDownloader.ThumbnailDownloadListener<PhotoHolder>() {
                     @Override
@@ -61,6 +61,9 @@ public class PhotoGalleryFragment extends Fragment {
         );
         mThumbnailDownloader.start();
         mThumbnailDownloader.getLooper();
+        mGalleryItemThumbnailDownloader = new ThumbnailDownloader<>(responseHandler, mThumbnailCache);
+        mGalleryItemThumbnailDownloader.start();
+        mGalleryItemThumbnailDownloader.getLooper();
         Log.i(TAG, "Background thread started");
         new FetchItemsTask().execute(String.valueOf(mPage++));
     }
@@ -70,6 +73,8 @@ public class PhotoGalleryFragment extends Fragment {
                              Bundle savedInstanceState) {
         View v = inflater.inflate(R.layout.fragment_photo_gallery, container, false);
         mPhotoRecyclerView = (RecyclerView) v.findViewById(R.id.photo_recycler_view);
+        mPhotoRecyclerView.setLayoutManager(new GridLayoutManager(getActivity(), 3));
+        GridLayoutManager layoutManager = (GridLayoutManager) mPhotoRecyclerView.getLayoutManager();
         mPhotoRecyclerView.getViewTreeObserver()
                 .addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
             @Override
@@ -77,14 +82,17 @@ public class PhotoGalleryFragment extends Fragment {
                 if (v.getWidth() > 1600) {
                     ((GridLayoutManager)mPhotoRecyclerView.getLayoutManager()).setSpanCount(4);
                 }
+                mLastVisibleItemPosition = ((GridLayoutManager)mPhotoRecyclerView
+                        .getLayoutManager()).findLastVisibleItemPosition();
+                Log.i(TAG, "Последний видимый элемент: " + String.valueOf(mLastVisibleItemPosition));
+                mPhotoRecyclerView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
             }
         });
-        mPhotoRecyclerView.setLayoutManager(new GridLayoutManager(getActivity(), 3));
-        LinearLayoutManager layoutManager = (LinearLayoutManager) mPhotoRecyclerView.getLayoutManager();
         mPhotoRecyclerView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
                 //super.onScrolled(recyclerView, dx, dy);
+                List<GalleryItem> preloadBitmapList;
                 if (dy > 0) {
                     int visibleItemCount = layoutManager.getChildCount();
                     int totalItemCount = layoutManager.getItemCount();
@@ -97,8 +105,27 @@ public class PhotoGalleryFragment extends Fragment {
                     }
                     if (!mLoading && (visibleItemCount + firstVisibleItem) >= totalItemCount) {
                         mProgressBar.setVisibility(ProgressBar.VISIBLE);
+                        mNewPageLoaded = false;
                         new FetchItemsTask().execute(String.valueOf(mPage++));
                         mLoading = true;
+                    }
+                    if (mNewPageLoaded &
+                            (layoutManager.findLastVisibleItemPosition() > mLastVisibleItemPosition)) {
+                        Log.i(TAG, String.valueOf(mLastVisibleItemPosition));
+                        if (mLastVisibleItemPosition < mItems.size() - 10) {
+                            preloadBitmapList = mItems
+                                    .subList(mLastVisibleItemPosition, mLastVisibleItemPosition + 10);
+                        } else {
+                            preloadBitmapList = mItems
+                                    .subList(mLastVisibleItemPosition, mItems.size() - 1);
+                        }
+                        for (GalleryItem item : preloadBitmapList) {
+                            mGalleryItemThumbnailDownloader.queueThumbnail(item, item.getUrl());
+                            if (item.getUrl() != null) {
+                                Log.i(TAG, item.getUrl());
+                            }
+                        }
+                        mLastVisibleItemPosition = layoutManager.findLastVisibleItemPosition();
                     }
                 }
             }
@@ -111,12 +138,14 @@ public class PhotoGalleryFragment extends Fragment {
     public void onDestroyView() {
         super.onDestroyView();
         mThumbnailDownloader.clearQueue();
+        mGalleryItemThumbnailDownloader.clearQueue();
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
         mThumbnailDownloader.quit();
+        mGalleryItemThumbnailDownloader.quit();
         Log.i(TAG, "Background thread destroyed");
     }
 
@@ -124,6 +153,17 @@ public class PhotoGalleryFragment extends Fragment {
         if (isAdded()) {
             if (mPhotoRecyclerView.getAdapter() == null ) {
                 mPhotoRecyclerView.setAdapter(new PhotoAdapter(mItems));
+                Thread thread = new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                    }
+                });
+                try {
+                    thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                thread.start();
             } else {
                 mPhotoRecyclerView.getAdapter().notifyDataSetChanged();
             }
@@ -182,6 +222,7 @@ public class PhotoGalleryFragment extends Fragment {
             mProgressBar.setVisibility(ProgressBar.GONE);
             mItems.addAll(items);
             setupAdapter();
+            mNewPageLoaded = true;
         }
     }
 }
