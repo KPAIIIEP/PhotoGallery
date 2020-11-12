@@ -33,6 +33,11 @@ public class FlickrFetchr {
             .appendQueryParameter("nojsoncallback", "1")
             .appendQueryParameter("extras", "url_s")
             .build();
+    private String mPage;
+
+    public void setPage(String page) {
+        mPage = page;
+    }
 
     public byte[] getUrlBytes(String urlSpec) throws IOException {
         URL url = new URL(urlSpec);
@@ -72,14 +77,6 @@ public class FlickrFetchr {
     private List<GalleryItem> downloadGalleryItems(String url) {
         List<GalleryItem> items = new ArrayList<>();
         try {
-            String url = Uri.parse("https://api.flickr.com/services/rest/")
-                    .buildUpon()
-                    .appendQueryParameter("method", "flickr.photos.getRecent")
-                    .appendQueryParameter("api_key", Settings.API_KEY)
-                    .appendQueryParameter("format", "json")
-                    .appendQueryParameter("nojsoncallback", "1")
-                    .appendQueryParameter("extras", "url_s")
-                    .build().toString();
             String jsonString = getUrlString(url);
             JSONObject jsonBody = new JSONObject(jsonString);
             Log.i(TAG, "Received JSON: " + jsonString);
@@ -94,6 +91,7 @@ public class FlickrFetchr {
 
     private String buildUrl(String method, String query) {
         Uri.Builder uriBuilder = ENDPOINT.buildUpon().appendQueryParameter("method", method);
+        uriBuilder.appendQueryParameter("page", mPage);
         if (method.equals(SEARCH_METHOD)) {
             uriBuilder.appendQueryParameter("text", query);
         }

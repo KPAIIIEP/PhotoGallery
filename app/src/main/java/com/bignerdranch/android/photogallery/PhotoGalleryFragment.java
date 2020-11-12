@@ -1,10 +1,10 @@
 package com.bignerdranch.android.photogallery;
 
-import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.util.Log;
@@ -18,6 +18,7 @@ import android.widget.ImageView;
 import android.view.ViewTreeObserver;
 import android.widget.ProgressBar;
 
+import androidx.annotation.RequiresApi;
 import androidx.appcompat.widget.SearchView;
 import androidx.annotation.NonNull;
 import androidx.fragment.app.Fragment;
@@ -72,8 +73,6 @@ public class PhotoGalleryFragment extends Fragment {
         mGalleryItemThumbnailDownloader = new ThumbnailDownloader<>(responseHandler, mThumbnailCache);
         mGalleryItemThumbnailDownloader.start();
         mGalleryItemThumbnailDownloader.getLooper();
-        Log.i(TAG, "Background thread started");
-        new FetchItemsTask().execute(String.valueOf(mPage++));
     }
 
     @Override
@@ -114,7 +113,7 @@ public class PhotoGalleryFragment extends Fragment {
                     if (!mLoading && (visibleItemCount + firstVisibleItem) >= totalItemCount) {
                         mProgressBar.setVisibility(ProgressBar.VISIBLE);
                         mNewPageLoaded = false;
-                        new FetchItemsTask().execute(String.valueOf(mPage++));
+                        updateItems();
                         mLoading = true;
                     }
                     if (mNewPageLoaded &
@@ -157,6 +156,7 @@ public class PhotoGalleryFragment extends Fragment {
         Log.i(TAG, "Background thread destroyed");
     }
 
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     @Override
     public void onCreateOptionsMenu(Menu menu, MenuInflater menuInflater) {
         super.onCreateOptionsMenu(menu, menuInflater);
@@ -169,6 +169,10 @@ public class PhotoGalleryFragment extends Fragment {
             public boolean onQueryTextSubmit(String s) {
                 Log.d(TAG, "QueryTextSubmit: " + s);
                 QueryPreferences.setStoredQuery(getActivity(), s);
+                mPage = 1;
+                mPreviousTotal = 0;
+                mItems.clear();
+                mPhotoRecyclerView.getAdapter().notifyDataSetChanged();
                 updateItems();
                 return true;
             }
@@ -187,23 +191,31 @@ public class PhotoGalleryFragment extends Fragment {
             }
         });
         MenuItem toggleItem = menu.findItem(R.id.menu_item_toggle_polling);
-        if (PollService.isServiceAlarmOn(getActivity())) {
+//        if (PollService.isServiceAlarmOn(getActivity())) {
+        if (PollJobService.isPollJobServiceOn(getContext())) {
             toggleItem.setTitle(R.string.stop_polling);
         } else {
             toggleItem.setTitle(R.string.start_polling);
         }
     }
 
+    @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.menu_item_clear:
                 QueryPreferences.setStoredQuery(getActivity(), null);
+                mPage = 1;
+                mPreviousTotal = 0;
+                mItems.clear();
+                mPhotoRecyclerView.getAdapter().notifyDataSetChanged();
                 updateItems();
                 return true;
             case R.id.menu_item_toggle_polling:
-                boolean shouldStartAlarm = !PollService.isServiceAlarmOn(getActivity());
-                PollService.setServiceAlarm(getActivity(), shouldStartAlarm);
+                //boolean shouldStartAlarm = !PollService.isServiceAlarmOn(getActivity());
+                //PollService.setServiceAlarm(getActivity(), shouldStartAlarm);
+                boolean isPollJobServiceOn = !PollJobService.isPollJobServiceOn(getContext());
+                PollJobService.startPollJobService(getContext(), isPollJobServiceOn);
                 getActivity().invalidateOptionsMenu();
                 return true;
             default:
@@ -213,7 +225,7 @@ public class PhotoGalleryFragment extends Fragment {
 
     private void updateItems() {
         String query = QueryPreferences.getStoredQuery(getActivity());
-        new FetchItemsTask(query).execute();
+        new FetchItemsTask(query).execute(String.valueOf(mPage++));
     }
 
     private void setupAdapter() {
@@ -278,7 +290,7 @@ public class PhotoGalleryFragment extends Fragment {
         }
     }
 
-    private class FetchItemsTask extends AsyncTask<Void, Void, List<GalleryItem>> {
+    private class FetchItemsTask extends AsyncTask<String, Void, List<GalleryItem>> {
         private String mQuery;
 
         public FetchItemsTask(String query) {
@@ -286,11 +298,13 @@ public class PhotoGalleryFragment extends Fragment {
         }
 
         @Override
-        protected List<GalleryItem> doInBackground(Void... params) {
+        protected List<GalleryItem> doInBackground(String... params) {
+            FlickrFetchr ff = new FlickrFetchr();
+            ff.setPage(params[0]);
             if (mQuery == null) {
-                return new FlickrFetchr().fetchRecentPhotos();
+                return ff.fetchRecentPhotos();
             } else {
-                return new FlickrFetchr().searchPhotos(mQuery);
+                return ff.searchPhotos(mQuery);
             }
         }
 
