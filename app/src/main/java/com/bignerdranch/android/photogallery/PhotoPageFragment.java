@@ -1,6 +1,7 @@
 package com.bignerdranch.android.photogallery;
 
 import android.annotation.SuppressLint;
+import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -58,7 +59,18 @@ public class PhotoPageFragment extends VisibleFragment {
                 activity.getSupportActionBar().setSubtitle(title);
             }
         });
-        mWebView.setWebViewClient(new WebViewClient());
+        mWebView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                String scheme = Uri.parse(url).getScheme();
+                if (!scheme.equals("http") & !scheme.equals("https")) {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                    startActivity(Intent.createChooser(intent, "Выберите приложение"));
+                    return true;
+                }
+                return false;
+            }
+        });
         mWebView.loadUrl(mUri.toString());
         return v;
     }
